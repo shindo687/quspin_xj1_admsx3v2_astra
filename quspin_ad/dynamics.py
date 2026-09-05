@@ -186,6 +186,7 @@ def fixed_grid_trajectory(hamiltonian, psi0, times, controls=None,
     psi, grid, controls, interval = _validate_inputs(psi0, times, controls, hamiltonian_derivatives, checkpoint_interval)
     states, _ = _forward(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval)
     output = np.moveaxis(states, 0, -1)
+    output_shape = output.shape
     if objective is not None:
         return _objective_value_and_gradient(objective, states, grid, objective_gradient)[0]
     return output
@@ -299,6 +300,7 @@ def _fixed_vjp(wrt, hamiltonian, psi0, times, controls=None,
         raise TypeError("hamiltonian_derivatives metadata is required for controls")
     states, _ = _forward(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval)
     output = np.moveaxis(states, 0, -1)
+    output_shape = output.shape
     value = output
     objective_cotangent = None
     if objective is not None: value, objective_cotangent = _objective_value_and_gradient(objective, states, grid, objective_gradient)
@@ -307,7 +309,7 @@ def _fixed_vjp(wrt, hamiltonian, psi0, times, controls=None,
         if objective is not None: g = np.asarray(cotangent) * np.moveaxis(objective_cotangent, 0, -1)
         else:
             g = np.asarray(cotangent)
-            if g.shape != output.shape: raise ValueError("trajectory cotangent must match output shape")
+            if g.shape != output_shape: raise ValueError("trajectory cotangent must match output shape")
         psi_grad, control_grad = _reverse(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval, g)
         result = {}
         if "psi0" in wrt: result["psi0"] = _input_gradient(np.asarray(psi0), psi_grad)
