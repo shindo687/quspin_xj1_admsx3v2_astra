@@ -126,10 +126,11 @@ measurement routines contain sorting, rank changes, SVD/eigenvalue branches or
 discrete subsystem choices; `mean_level_spacing` sorts and branches at ties;
 `evolve`, Floquet, Lanczos eigensolvers and exponential operators contain
 adaptive solvers/iterators.
-Hamiltonian/quantum-operator methods (`dot`, `expt_value`, `matrix_ele`) are
-object-bound and their parameter dictionaries and dynamic drives require an
-explicit adapter contract not present in QuSpin's public API.  These entries
-are marked `deferred` or `not_suitable` with evidence paths in
+Hamiltonian/quantum-operator methods (`dot`, `expt_value`, `matrix_ele`) remain
+object-bound and deferred.  Dynamic pure-state evolution is available through
+the explicit `fixed_grid_trajectory` adapter above; direct differentiation of
+an arbitrary bound `H.evolve` method still requires that adapter's callback and
+derivative metadata.  These entries are marked `deferred` or `not_suitable` with evidence paths in
 `api_inventory.json`; they fail explicitly with ChainRules `RuleNotFound` if
 called through AD.
 
