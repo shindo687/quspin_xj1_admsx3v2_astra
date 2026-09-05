@@ -115,6 +115,8 @@ def _rk4_step(hamiltonian, state, time, dt, controls, derivatives=None, dstate=N
         available = _derivatives_at(derivatives, at, controls)
         combined = np.zeros_like(h1, dtype=np.result_type(h1, np.complex128))
         for name, direction in dcontrols.items():
+            if direction is ad.ZERO:
+                continue
             if name not in available:
                 raise TypeError(f"missing derivative metadata for control {name!r}")
             combined = combined + direction * available[name]
