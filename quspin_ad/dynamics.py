@@ -255,7 +255,15 @@ def _reverse_step(hamiltonian, state, time, dt, controls, derivatives, cotangent
         for name in names:
             if name not in available:
                 raise TypeError(f"missing derivative metadata for control {name!r}")
-            grad[name] += weight * np.real(np.vdot(bar, -1j * available[name].dot(stage)))
+            # For a complex control, the real-linear cotangent g is defined by
+            #   Re(conj(g) * da) = Re(vdot(bar, JVP(da))).
+            # If c = vdot(bar, dstate/da), this means g = conj(c).  Taking
+            # only Re(c) loses the cotangent component for imaginary tangents.
+            coefficient = weight * np.vdot(bar, -1j * available[name].dot(stage))
+            if np.iscomplexobj(controls[name]):
+                grad[name] += np.conj(coefficient)
+            else:
+                grad[name] += np.real(coefficient)
     bk1 = dt * lam / 6; bk2 = dt * lam / 3; bk3 = dt * lam / 3; bk4 = dt * lam / 6
     bx = lam.copy()
     by4 = 1j * h2.conj().T.dot(bk4); bx += by4; bk3 += dt * by4

@@ -42,6 +42,26 @@ def test_dynamic_coefficients_central_fd_and_duality():
         np.testing.assert_allclose(gradients[name], np.real(np.vdot(cotangent, tangent)), atol=1e-10)
 
 
+def test_complex_control_vjp_jvp_real_linear_duality():
+    psi = np.array([1., .1j]); times = np.linspace(0., 1., 33)
+    controls = {"amplitude": .7 + .2j, "omega": 1.3}
+    rng = np.random.default_rng(17)
+    cotangent = rng.normal(size=(2, len(times))) + 1j * rng.normal(size=(2, len(times)))
+    _, pullback = ad.vjp(qa.fixed_grid_trajectory, hamiltonian, psi, times,
+                          controls, derivatives, wrt="controls", checkpoint_interval=7)
+    gradient = pullback(cotangent)["controls"]["amplitude"]
+    assert np.iscomplexobj(gradient)
+    for da in (1.0, 1.0j):
+        _, tangent = ad.jvp(qa.fixed_grid_trajectory, hamiltonian, psi, times,
+                            controls, derivatives,
+                            tangents={"controls": {"amplitude": da}})
+        np.testing.assert_allclose(
+            np.real(np.conj(gradient) * da),
+            np.real(np.vdot(cotangent, tangent)),
+            atol=1e-10,
+        )
+
+
 def test_scalar_objective_and_initial_state_direction():
     psi = np.array([1., 0.]); times = np.linspace(0., 1., 33)
     controls = {"amplitude": .7, "omega": 1.3}
