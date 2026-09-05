@@ -62,6 +62,30 @@ def test_scalar_objective_and_initial_state_direction():
     assert np.isfinite(dy).all()
 
 
+def test_initial_state_tangent_needs_no_control_metadata():
+    h = lambda t, controls: X
+    psi = np.array([1., 0.], complex)
+    dpsi = np.array([0., 1.], complex)
+    value, tangent = ad.jvp(
+        qa.fixed_grid_trajectory, h, psi, np.linspace(0., 1., 5),
+        tangents={"psi0": dpsi},
+    )
+    assert value.shape == tangent.shape == (2, 5)
+    assert np.linalg.norm(tangent) > 0
+
+
+def test_checkpoint_forward_does_not_store_trajectory():
+    from quspin_ad import dynamics
+    psi = np.array([1., 0.], complex)
+    times = np.linspace(0., 1., 101)
+    trajectory, checkpoints = dynamics._forward(
+        lambda t, controls: X, psi, times, {}, None, 10,
+        store_trajectory=False,
+    )
+    assert trajectory is None
+    assert len(checkpoints) == 11
+
+
 def test_time_integrated_objective():
     psi = np.array([1., 0.]); times = np.linspace(0., 1., 33)
     controls = {"amplitude": .7, "omega": 1.3}

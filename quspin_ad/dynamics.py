@@ -110,17 +110,19 @@ def _rk4_step(hamiltonian, state, time, dt, controls, derivatives=None, dstate=N
     if dstate is None:
         return out, None
     dcontrols = {} if dcontrols is None else dcontrols
-    dh = {}
-    for at in (time, time + dt / 2, time + dt):
-        available = _derivatives_at(derivatives, at, controls)
-        combined = np.zeros_like(h1, dtype=np.result_type(h1, np.complex128))
-        for name, direction in dcontrols.items():
-            if direction is ad.ZERO:
-                continue
-            if name not in available:
-                raise TypeError(f"missing derivative metadata for control {name!r}")
-            combined = combined + direction * available[name]
-        dh[at] = combined
+    # A state-only tangent does not need a control derivative contract.  In
+    # particular, do not call _derivatives_at(None, ...) for dpsi0-only JVPs.
+    active_controls = {name: direction for name, direction in dcontrols.items()
+                       if direction is not ad.ZERO}
+    dh = {at: np.zeros_like(h1, dtype=np.result_type(h1, np.complex128))
+          for at in (time, time + dt / 2, time + dt)}
+    if active_controls:
+        for at in dh:
+            available = _derivatives_at(derivatives, at, controls)
+            for name, direction in active_controls.items():
+                if name not in available:
+                    raise TypeError(f"missing derivative metadata for control {name!r}")
+                dh[at] = dh[at] + direction * available[name]
     def drhs(matrix, dmatrix, state_, dstate_):
         return -1j * (matrix.dot(dstate_) + dmatrix.dot(state_))
     q1 = drhs(h1, dh[time], state, dstate)
@@ -131,15 +133,45 @@ def _rk4_step(hamiltonian, state, time, dt, controls, derivatives=None, dstate=N
     return out, dout
 
 
-def _forward(hamiltonian, psi, times, controls, derivatives, checkpoint_interval):
-    states = np.empty((times.size,) + psi.shape, dtype=np.result_type(psi, np.complex128))
-    states[0] = psi
-    checkpoints = {0: states[0].copy()}
+def _forward(hamiltonian, psi, times, controls, derivatives, checkpoint_interval,
+             store_trajectory=True):
+    """Run the primal pass, retaining checkpoints and optionally the trajectory.
+
+    Reverse mode requests ``store_trajectory=False``.  Its memory then scales
+    with the checkpoint set and the single replay block in ``_reverse``;
+    trajectory materialization for the returned primal value is separate.
+    """
+    trajectory = None
+    if store_trajectory:
+        trajectory = np.empty((times.size,) + psi.shape,
+                              dtype=np.result_type(psi, np.complex128))
+        trajectory[0] = psi
+    checkpoints = {0: np.asarray(psi, dtype=np.result_type(psi, np.complex128)).copy()}
+    state = checkpoints[0]
     for i, dt in enumerate(np.diff(times)):
-        states[i + 1], _ = _rk4_step(hamiltonian, states[i], times[i], dt, controls, derivatives=None)
+        state, _ = _rk4_step(hamiltonian, state, times[i], dt, controls, derivatives=None)
+        if trajectory is not None:
+            trajectory[i + 1] = state
         if (i + 1) % checkpoint_interval == 0 or i + 1 == times.size - 1:
-            checkpoints[i + 1] = states[i + 1].copy()
-    return states, checkpoints
+            checkpoints[i + 1] = state.copy()
+    return trajectory, checkpoints
+
+
+def _materialize_trajectory(hamiltonian, psi, times, controls, checkpoints,
+                            checkpoint_interval):
+    """Replay checkpoint blocks to produce the public state-by-time array."""
+    trajectory = np.empty((times.size,) + np.asarray(psi).shape,
+                          dtype=np.result_type(psi, np.complex128))
+    for start, state0 in zip(sorted(checkpoints)[:-1], sorted(checkpoints)[1:]):
+        local = [checkpoints[start]]
+        for i in range(start, state0):
+            nxt, _ = _rk4_step(hamiltonian, local[-1], times[i],
+                               times[i + 1] - times[i], controls)
+            local.append(nxt)
+        trajectory[start:state0 + 1] = np.asarray(local)
+    if times.size == 1:
+        trajectory[0] = checkpoints[0]
+    return trajectory
 
 
 def _objective_value_and_gradient(objective, states, times, objective_gradient=None):
@@ -237,19 +269,14 @@ def _reverse_step(hamiltonian, state, time, dt, controls, derivatives, cotangent
     return bx, grad
 
 
-def _reverse(hamiltonian, psi, times, controls, derivatives, interval, cotangent):
+def _reverse(hamiltonian, times, controls, derivatives, interval, cotangent,
+             checkpoints, control_names=None):
     """Checkpointed reverse pass; only one checkpoint block is replayed at once."""
-    names = tuple(controls)
-    checkpoints = {0: np.asarray(psi, dtype=np.result_type(psi, np.complex128))}
-    state = checkpoints[0]
-    for i, dt in enumerate(np.diff(times)):
-        state, _ = _rk4_step(hamiltonian, state, times[i], dt, controls)
-        if (i + 1) % interval == 0 or i + 1 == times.size - 1:
-            checkpoints[i + 1] = state.copy()
+    names = tuple(controls if control_names is None else control_names)
     lam = np.moveaxis(np.asarray(cotangent), -1, 0).copy()
     if lam.shape[0] != times.size:
         raise ValueError("trajectory cotangent must match output shape")
-    input_grad = np.zeros_like(state, dtype=np.result_type(state, np.complex128))
+    input_grad = np.zeros_like(checkpoints[0], dtype=np.result_type(checkpoints[0], np.complex128))
     grads = {name: 0.0 for name in names}
     ends = sorted(checkpoints)
     for end in reversed(ends[1:]):
@@ -276,10 +303,12 @@ def _fixed_jvp(tangents, hamiltonian, psi0, times, controls=None,
     if not continuous or topology_changes or getattr(hamiltonian, "discontinuous", False):
         raise ValueError("fixed_grid_trajectory requires a continuous fixed-topology callback")
     psi, grid, controls, interval = _validate_inputs(psi0, times, controls, hamiltonian_derivatives, checkpoint_interval)
-    dpsi = tangents.get("psi0", ad.ZERO); dc = tangents.get("controls", ad.ZERO)
-    if controls and hamiltonian_derivatives is None:
-        raise TypeError("hamiltonian_derivatives metadata is required for controls")
+    dpsi = tangents.get("psi0", ad.ZERO)
+    dc = tangents.get("controls", ad.ZERO)
     dc = {} if dc is ad.ZERO else dict(dc)
+    active_control_tangent = any(direction is not ad.ZERO for direction in dc.values())
+    if active_control_tangent and hamiltonian_derivatives is None:
+        raise TypeError("hamiltonian_derivatives metadata is required for controls")
     tangent = _linearized(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval,
                           None if dpsi is ad.ZERO else _array(dpsi, name="dpsi0"), dc)
     states, _ = _forward(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval)
@@ -298,9 +327,11 @@ def _fixed_vjp(wrt, hamiltonian, psi0, times, controls=None,
     if not continuous or topology_changes or getattr(hamiltonian, "discontinuous", False):
         raise ValueError("fixed_grid_trajectory requires a continuous fixed-topology callback")
     psi, grid, controls, interval = _validate_inputs(psi0, times, controls, hamiltonian_derivatives, checkpoint_interval)
-    if controls and hamiltonian_derivatives is None:
+    if "controls" in wrt and controls and hamiltonian_derivatives is None:
         raise TypeError("hamiltonian_derivatives metadata is required for controls")
-    states, _ = _forward(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval)
+    _, checkpoints = _forward(hamiltonian, psi, grid, controls, hamiltonian_derivatives,
+                              interval, store_trajectory=False)
+    states = _materialize_trajectory(hamiltonian, psi, grid, controls, checkpoints, interval)
     output = np.moveaxis(states, 0, -1)
     output_shape = output.shape
     value = output
@@ -312,7 +343,10 @@ def _fixed_vjp(wrt, hamiltonian, psi0, times, controls=None,
         else:
             g = np.asarray(cotangent)
             if g.shape != output_shape: raise ValueError("trajectory cotangent must match output shape")
-        psi_grad, control_grad = _reverse(hamiltonian, psi, grid, controls, hamiltonian_derivatives, interval, g)
+        psi_grad, control_grad = _reverse(
+            hamiltonian, grid, controls, hamiltonian_derivatives, interval, g,
+            checkpoints, control_names=tuple(controls) if "controls" in wrt else (),
+        )
         result = {}
         if "psi0" in wrt: result["psi0"] = _input_gradient(np.asarray(psi0), psi_grad)
         if "controls" in wrt: result["controls"] = control_grad

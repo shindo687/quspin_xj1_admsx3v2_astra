@@ -113,8 +113,11 @@ JVP supports `psi0` and mapping-valued `controls` tangents. VJP uses the real
 complex inner product and returns matching keys. `StateObjective(value,
 gradient, mode="final"|"integral")` supplies analytic final-state or
 trapezoidal time-integrated scalar objectives. `checkpoint_interval` stores
-periodic states and replays one block at a time in reverse mode; no runtime
-finite differences are used.
+periodic states and replays one block at a time in reverse mode. The reverse
+working set contains the checkpoints and one replay block; the returned primal
+trajectory (and any objective cotangent needed by a trajectory objective)
+remains available to the caller separately. No runtime finite differences are
+used.
 
 ## Deferred or unsuitable API
 
