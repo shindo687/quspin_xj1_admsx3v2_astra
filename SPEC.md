@@ -99,6 +99,23 @@ returns requested `Obs`/`proj` gradients under the real Frobenius inner product.
 `dtype` and orientation are fixed during differentiation.  Central differences
 and JVP/VJP duality are checked to `2e-6`.
 
+### `quspin_ad.fixed_grid_trajectory(...)`
+
+This rule integrates a vector (or batch of vectors) with fixed-step RK4 on a
+strictly increasing real grid. `hamiltonian` is `H(t, controls)` or a QuSpin
+object exposing `tocsr(time=t)`. Active controls require explicit
+`hamiltonian_derivatives` metadata returning `{name: dH/dname}`; missing
+metadata, discontinuous callbacks, topology changes, adaptive solvers and
+non-scalar controls fail explicitly. The output keeps QuSpin's
+state-by-time shape `(Ns, Ntime)` (or `(Ns, Nstate, Ntime)`).
+
+JVP supports `psi0` and mapping-valued `controls` tangents. VJP uses the real
+complex inner product and returns matching keys. `StateObjective(value,
+gradient, mode="final"|"integral")` supplies analytic final-state or
+trapezoidal time-integrated scalar objectives. `checkpoint_interval` stores
+periodic states and replays one block at a time in reverse mode; no runtime
+finite differences are used.
+
 ## Deferred or unsuitable API
 
 The remaining inventory entries are intentionally not registered.  Basis

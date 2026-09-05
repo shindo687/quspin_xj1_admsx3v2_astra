@@ -414,8 +414,6 @@ def _ed_vjp(
 def lin_comb_Q_T(coeff: object, Q_T: object, out: object = None) -> Any:
     """Call :func:`quspin.tools.lanczos.lin_comb_Q_T` (primal only)."""
     return _native("quspin.tools.lanczos.lin_comb_Q_T")(coeff, Q_T, out=out)
-
-
 def project_op(Obs: object, proj: object, dtype: object = np.complex128) -> Any:
     """Call QuSpin's observable projection routine (primal only)."""
     return _native("quspin.tools.misc.project_op")(Obs, proj, dtype=dtype)

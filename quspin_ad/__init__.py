@@ -18,6 +18,10 @@ from .rules import (
     register_upstream_rules,
 )
 from .rules import ad as _ad
+from .dynamics import (
+    StateObjective, fixed_grid_trajectory, dynamic_trajectory,
+    evolve_fixed_grid, evolve,
+)
 
 ZERO = _ad.ZERO
 grad = _ad.grad
@@ -28,6 +32,11 @@ vjp = _ad.vjp
 __all__ = [
     "ZERO",
     "ED_state_vs_time",
+    "StateObjective",
+    "fixed_grid_trajectory",
+    "dynamic_trajectory",
+    "evolve_fixed_grid",
+    "evolve",
     "KL_div",
     "anti_commutator",
     "coherent_state",

@@ -29,7 +29,10 @@ gradients = pullback(1.0)
 Supported rules and their mathematical domains are specified in [SPEC.md](SPEC.md).
 The package currently covers the continuous, array-valued APIs `KL_div`,
 `coherent_state`, `commutator`, `anti_commutator`, `ED_state_vs_time`,
-`lin_comb_Q_T`, and `project_op` (dense ndarray domain).  Discrete basis
+`lin_comb_Q_T`, and `project_op` (dense ndarray domain), plus
+`fixed_grid_trajectory` for explicit dynamic-drive derivative contracts.
+For example, pass `hamiltonian_derivatives={"amplitude": dH_da}` and use
+`ad.jvp(..., tangents={"controls": {"amplitude": 1.0}})`.  Discrete basis
 construction, eigensolvers, entropy routines,
 I/O, sparse/operator object methods, and non-array workflows are explicitly
 reported as deferred or not suitable for AD rather than approximated by finite
